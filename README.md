@@ -4,7 +4,7 @@ This repository provides the data and annotated R scripts necessary to replicate
 
 The repository includes:
 
-📂 Excel spreadsheets with raw data for a fish specie
+📂 Excel spreadsheets with raw data for a fish species (_Acestrorhynchus lacustris_) used as example;
 
 📄 A detailed R Markdown (.Rmd) and HTML files that guides users through the process of:
 
