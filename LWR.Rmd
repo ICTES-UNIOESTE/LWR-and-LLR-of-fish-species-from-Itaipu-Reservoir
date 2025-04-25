@@ -1,0 +1,328 @@
+---
+title: "Guide to Length–Weight Relationship Analysis for Freshwater Fish"
+author: "Éder André Gubiani, Luiz Guilherme dos Santos Ribas, Anderson Luís Maciel, Geuza Cantanhêde, Laís Thayse Meier, Carlos Henrique Monteiro Patrício, Pitágoras Augusto Piana, and Caroline Henn"
+date: "04/24/2025"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: united
+    df_print: paged
+    code_folding: none
+  word_document:
+    toc: true
+    number_sections: true
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Introduction
+
+This guide demonstrates how to replicate the Length–Weight Relationship (LWR) analysis used in the study:
+
+**"Length–weight and length–length relationships of freshwater fish species caught by professional fishermen in the Itaipu Reservoir, Paraná River basin, Brazil"**
+
+The data and scripts are publicly available on GitHub: [ICTES-UNIOESTE/LWR-and-LLR-of-fish-species-from-Itaipu-Reservoir](https://github.com/ICTES-UNIOESTE/LWR-and-LLR-of-fish-species-from-Itaipu-Reservoir)
+
+This R Markdown provides detailed steps, explanations, and code to support replication and adaptation of the method.
+
+**Disclaimer:** This guide is configured to save output files (plots and spreadsheets) directly to the user's Desktop on a Windows operating system using `Sys.getenv("USERPROFILE")`. If you are using macOS or Linux, you will need to adjust the `desktop_path` variable to correctly point to your Desktop directory (e.g., `~/Desktop` on Unix-like systems).
+
+# Load Required Packages
+
+This section loads the necessary R packages for data handling, statistical modeling, visualization, and exporting results. Make sure all packages are installed before running this chunk.
+
+```{r load-packages}
+# These packages allow you to:
+# - read Excel files (readxl)
+# - create visualizations (ggplot2)
+# - manipulate data frames (dplyr)
+# - extract model summaries in tidy format (broom)
+# - export data to Excel format (writexl)
+
+# Install missing packages if needed
+packages <- c("readxl", "ggplot2", "dplyr", "broom", "writexl", "httr")
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+# Load packages if owned
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(writexl)
+library(httr)
+```
+
+# Download Data to Desktop and Load
+
+Here we define where the data will be downloaded (in this case, your Desktop), download the dataset from the GitHub repository if it's not already present, and read it into R while removing any rows with missing values.
+
+```{r load-data}
+# Define the download destination (Desktop)
+desktop_path <- file.path(Sys.getenv("USERPROFILE"), "Desktop")
+local_file <- file.path(desktop_path, "Acestrorhynchus_lacustris_length_weight.xlsx")
+
+# URL to the raw file on GitHub
+github_file_url <- "https://raw.githubusercontent.com/ICTES-UNIOESTE/LWR-and-LLR-of-fish-species-from-Itaipu-Reservoir/main/Acestrorhynchus%20lacustris%20length%E2%80%92weight.xlsx"
+
+# Download the file if it doesn't already exist
+if (!file.exists(local_file)) {
+  download.file(github_file_url, destfile = local_file, mode = "wb")
+}
+
+# Read and clean the data
+Data <- read_xlsx(local_file) %>% na.omit()
+```
+
+# Outlier Detection and Data Preparation
+
+```{r outliers}
+# Fit a linear model using log-transformed values of Weight and Standard Length (S_Length)
+# This is a common approach in LWR analysis because it linearizes the relationship
+Reg <- lm(log10(Weight) ~ log10(S_Length), data = Data)
+
+# Standardize residuals to detect outliers based on their deviation from the model
+Z.Res <- Reg$residuals / sd(Reg$residuals)
+# Flag values as outliers if their standardized residual is greater than or equal to 4
+outlier <- which(abs(Z.Res) >= 4)
+
+# Create a cleaned dataframe excluding the outliers
+Sex <- factor(Data$Sex)
+DF.S.outlier <- data.frame(Sex, Weight = Data$Weight, S_Length = Data$S_Length)
+if (length(outlier) > 0) DF.S.outlier <- DF.S.outlier[-outlier, ]
+
+# Exclude individuals with undefined or non-biological sex coding (e.g., "9")
+DF.S9.outlier <- filter(DF.S.outlier, Sex != "9")
+```
+
+# ANCOVA to Test for Sexual Dimorphism
+
+```{r ancova-test}
+# Perform an ANCOVA model to test if the slope and/or intercept differ between sexes
+# If either the interaction or the main effect is significant, it suggests that sex should be modeled separately
+Ancova <- lm(log10(Weight) ~ log10(S_Length) * Sex, data = DF.S9.outlier)
+
+# Retrieve the p-values for interaction (slope differences) and main effect (intercept differences)
+p.int <- anova(Ancova)["log10(S_Length):Sex", "Pr(>F)"]
+p.sex <- anova(Ancova)["Sex", "Pr(>F)"]
+```
+
+# Model and Plot if No Sexual Dimorphism Found
+
+```{r general-model}
+# If there is no evidence of differences by sex, proceed with a single model for all individuals
+if (p.int >= 0.05 & p.sex >= 0.05) {
+  Reg <- lm(log10(Weight) ~ log10(S_Length), data = DF.S.outlier)
+  Resum <- summary(Reg)
+
+  # Extract the model coefficients and confidence intervals
+  # Intercept is back-transformed to original scale
+  Parameter <- cbind(estimate = Resum$coefficients[,1], confint(Reg))
+  Parameter[1,] <- 10^Parameter[1,]
+  colnames(Parameter) <- c("estimate", "-95%CI", "95%CI")
+
+  # Test if the slope b is significantly different from 3 (indicative of isometric growth)
+  EP <- Resum$coefficients[2,2]  # standard error of the slope
+  test_b3 <- (Parameter[2,1] - 3) / EP
+  p_value_b <- (1 - pt(abs(test_b3), Reg$df.residual)) * 2
+  test_b <- data.frame(EP_b = EP, t = test_b3, p = p_value_b)
+
+  # Gather model statistics
+  R2 <- Resum$r.squared
+  n <- nrow(DF.S.outlier)
+  Result <- list(Parameter = Parameter, test_b = test_b, R2 = R2, n = n,
+                 Min_Max_Peso = range(DF.S.outlier$Weight),
+                 Min_Max_Length = range(DF.S.outlier$S_Length))
+  print(Result)
+
+  # Visualize the model with a fitted line and confidence bands
+  DF <- cbind(predict(Reg, interval = "confidence"), DF.S.outlier)
+  DF <- DF[order(DF$fit), ]
+  ggplot(DF, aes(x = S_Length, y = Weight)) +
+    geom_point() +
+    geom_ribbon(aes(ymin = 10^lwr, ymax = 10^upr), fill = "grey80", alpha = 0.5) +
+    geom_line(aes(y = 10^fit), color = "red", size = 1) +
+    labs(x = "Standard Length (cm)", y = "Weight (g)", title = "Length–Weight Relationship") +
+    theme_minimal()
+  Parameter = as.data.frame(Parameter)
+  
+  # Export results for use in reports and tables
+  write_xlsx(list(Parameter_intercept = as.data.frame(Parameter),
+                  Test_b = test_b,
+                  Metadata = data.frame(R2 = R2, n = n)),
+             path = "LWR_summary_results.xlsx")
+}
+```
+
+# Model and Plot for Each Sex if Significant Differences Found
+
+```{r sex-models}
+# If sex differences are significant, fit separate models for each group
+if (p.int < 0.05 | p.sex < 0.05) {
+  results_by_sex <- split(DF.S9.outlier, DF.S9.outlier$Sex)
+
+  # Apply model only if data is available (non-empty)
+  results_by_sex <- lapply(results_by_sex, function(df) {
+    if (nrow(df) == 0) return(NULL)
+
+    Reg <- lm(log10(Weight) ~ log10(S_Length), data = df)
+    Resum <- summary(Reg)
+    Parameter <- cbind(estimate = Resum$coefficients[,1], confint(Reg))
+    Parameter[1,] <- 10^Parameter[1,]
+    colnames(Parameter) <- c("estimate", "-95%CI", "95%CI")
+
+    EP <- Resum$coefficients[2,2]
+    test_b3 <- (Parameter[2,1] - 3) / EP
+    p_value_b <- (1 - pt(abs(test_b3), Reg$df.residual)) * 2
+
+    list(Parameter = Parameter,
+         test_b = data.frame(EP_b = EP, t = test_b3, p = p_value_b),
+         R2 = Resum$r.squared,
+         n = nrow(df),
+         Min_Max_Peso = range(df$Weight),
+         Min_Max_Length = range(df$S_Length))
+  })
+
+  # Remove NULLs (from empty subsets)
+  results_by_sex <- results_by_sex[!sapply(results_by_sex, is.null)]
+
+  # Convert to list of data frames for export
+  export_ready <- lapply(results_by_sex, function(res) {
+    if (is.null(res)) return(NULL)
+    out <- bind_rows(
+      as.data.frame(t(unlist(res$Parameter))),
+      as.data.frame(t(unlist(res$test_b))),
+      data.frame(R2 = res$R2, n = res$n, 
+                 Min_Peso = res$Min_Max_Peso[1], Max_Peso = res$Min_Max_Peso[2],
+                 Min_Length = res$Min_Max_Length[1], Max_Length = res$Min_Max_Length[2])
+    )
+    return(out)
+  })
+
+  # Name the list properly
+  names(export_ready) <- names(results_by_sex)
+
+  print(results_by_sex)
+  write_xlsx(export_ready, path = file.path(desktop_path, "LWR_by_sex_results.xlsx"))
+
+  # Plot each sex group with its respective linear model
+  ggplot(DF.S9.outlier, aes(x = S_Length, y = Weight, color = Sex)) +
+    geom_point() +
+    geom_smooth(method = "lm", formula = y ~ x, se = TRUE) +
+    labs(x = "Standard Length (cm)", y = "Weight (g)", title = "Sex-specific LWR") +
+    theme_minimal()
+}
+```
+
+# Export Results and Plots to Desktop
+
+This section checks if the required analysis objects exist and, if so, saves both the statistical results and the plots as Excel and PNG files on your Desktop. This makes it easy to retrieve and use outputs outside of R.
+
+```{r export-results-general}
+# Check if the general model exists before saving
+if (exists("Parameter") && exists("test_b") && exists("R2") && exists("n") && exists("DF") && exists("lwr") && exists("upr")) {
+  write_xlsx(list(
+                  Parameter_intercept = as.data.frame(t(Parameter[1,])),
+                  Parameter_log10_S_Length = as.data.frame(t(Parameter[2,])),Parameter = as.data.frame(Parameter),
+                  Test_b = test_b,
+                  Metadata = data.frame(R2 = R2, n = n)),
+             path = file.path(desktop_path, "LWR_summary_results.xlsx"))
+
+  # Save general plot to Desktop as PNG
+  png(filename = file.path(desktop_path, "LWR_general_plot.png"), width = 1200, height = 800, res = 150)
+  print(
+    ggplot(DF, aes(x = S_Length, y = Weight)) +
+      geom_point() +
+      geom_ribbon(aes(ymin = 10^lwr, ymax = 10^upr), fill = "grey80", alpha = 0.5) +
+      geom_line(aes(y = 10^fit), color = "red", size = 1) +
+      labs(x = "Standard Length (cm)", y = "Weight (g)", title = "Length–Weight Relationship") +
+      theme_minimal()
+  )
+  dev.off()
+} else {
+  message("General model objects not found. Skipping export.")
+}
+```
+
+```{r export-results-sex}
+# Check if results_by_sex exists and is a valid list of data frames before writing
+if (exists("results_by_sex") && length(results_by_sex) > 0 && all(sapply(results_by_sex, is.list))) {
+
+  # Convert each element in results_by_sex to a data frame
+  export_ready <- lapply(results_by_sex, function(res) {
+    if (is.null(res)) return(NULL)
+    out <- bind_rows(
+      data.frame(Parameter = rownames(res$Parameter), res$Parameter),
+      data.frame(Test_b = rownames(res$test_b), res$test_b),
+      data.frame(R2 = res$R2, n = res$n, 
+                 Min_Peso = res$Min_Max_Peso[1], Max_Peso = res$Min_Max_Peso[2],
+                 Min_Length = res$Min_Max_Length[1], Max_Length = res$Min_Max_Length[2])
+    )
+    return(out)
+  })
+
+  # Remove NULLs
+  export_ready <- export_ready[!sapply(export_ready, is.null)]
+  names(export_ready) <- names(results_by_sex)
+
+  # Save to Excel
+  write_xlsx(export_ready, path = file.path(desktop_path, "LWR_by_sex_results.xlsx"))
+
+  # Save plot as PNG
+  png(filename = file.path(desktop_path, "LWR_sex_specific_plot.png"), width = 1200, height = 800, res = 150)
+    print(
+      ggplot(DF.S9.outlier, aes(x = S_Length, y = Weight, color = Sex)) +
+        geom_point() +
+        geom_smooth(method = "lm", formula = y ~ x, se = TRUE) +
+        labs(x = "Standard Length (cm)", y = "Weight (g)", title = "Sex-specific LWR") +
+        theme_minimal()
+    )
+  dev.off()
+
+} else {
+  message("Sex-specific results not available or improperly formatted. Skipping export.")
+}
+```
+
+# Conclusion
+
+This R Markdown guide provides a full pipeline to:
+
+- Estimate LWR parameters
+- Detect and remove statistical outliers
+- Test for differences between sexes using ANCOVA
+- Plot the relationships with fitted regression lines and confidence intervals
+- Export results in user-friendly Excel tables
+
+# Glossary
+
+**LWR**: Length–Weight Relationship. A model describing how body weight relates to body length in organisms.
+
+**LLR**: Length–Length Relationship. A model describing how different body length metrics relate to each other.
+
+**ANCOVA**: Analysis of Covariance. A statistical technique used to compare one or more regression lines.
+
+**Isometry**: A situation where the relationship between weight and length follows a cubic pattern (slope = 3).
+
+**Residual**: The difference between observed and predicted values from a model.
+
+# FAQ
+
+**Q: Why transform the data using log10?**
+A: The LWR model is non-linear in its original form, and log transformation linearizes it, enabling the use of linear regression.
+
+**Q: How do I interpret the slope coefficient?**
+A: A slope value (b) close to 3 indicates isometric growth, where weight increases proportionally with the cube of the length. Values significantly above or below 3 suggest allometric growth — positive allometry if b > 3 (weight increases faster than length), and negative allometry if b < 3 (weight increases more slowly).
+
+**Q: Why remove individuals with sex = 9?**
+A: In this dataset, the value 9 was used to indicate missing, undefined, or invalid sex classification. It can be found in the last line of chunk number four. Such entries may bias the analysis. You should adapt this filtering step according to the specific coding of your dataset.
+
+**Q: Can I use this script with a different dataset?**
+A: Yes, update the `github_file_url` with your own file and ensure column names match (e.g., `Weight`, `S_Length`, `Sex`). The code was designed for multiple uses with small adjustments needed.
