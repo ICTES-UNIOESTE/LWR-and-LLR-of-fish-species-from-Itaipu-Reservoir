@@ -9,9 +9,13 @@ The repository includes:
 📄 A detailed R Markdown (.Rmd) and HTML files that guides users through the process of:
 
  -Fitting Length–Weight Relationships (LWR files)
+ 
  -Fitting Length–Length Relationships (LLR files)
+ 
  -Detecting and removing outliers
+ 
  -Testing for sexual dimorphism using ANCOVA
+ 
  -Exporting results as .xlsx and .png files
 
 ⚠️ Note: The scripts are set to save results to the user’s Desktop on Windows. If you are using macOS or Linux, you’ll need to adjust the desktop_path accordingly.
