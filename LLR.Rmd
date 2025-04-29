@@ -1,0 +1,307 @@
+---
+title: "Guide to Length–Length Relationship Analysis for Freshwater Fish"
+author: "Éder André Gubiani, Luiz Guilherme dos Santos Ribas, Anderson Luís Maciel, Geuza Cantanhêde, Laís Thayse Meier, Carlos Henrique Monteiro Patrício, Pitágoras Augusto Piana, and Caroline Henn"
+date: "04/24/2025"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: united
+    df_print: paged
+    code_folding: none
+  word_document:
+    toc: true
+    number_sections: true
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Introduction
+
+This guide demonstrates how to replicate the Length–Length Relationship (LLR) analysis used in the study:
+
+**"Length–weight and length–length relationships of freshwater fish species caught by professional fishermen in the Itaipu Reservoir, Paraná River basin, Brazil"**
+
+The data and scripts are publicly available on GitHub: [ICTES-UNIOESTE/LWR-and-LLR-of-fish-species-from-Itaipu-Reservoir](https://github.com/ICTES-UNIOESTE/LWR-and-LLR-of-fish-species-from-Itaipu-Reservoir)
+
+This R Markdown provides detailed steps, explanations, and code to support replication and adaptation of the method.
+
+**Disclaimer:** This guide is configured to save output files (plots and spreadsheets) directly to the user's Desktop on a Windows operating system using `Sys.getenv("USERPROFILE")`. If you are using macOS or Linux, you will need to adjust the `desktop_path` variable to correctly point to your Desktop directory (e.g., `~/Desktop` on Unix-like systems).
+
+# Load Required Packages
+
+This section loads the necessary R packages for data handling, statistical modeling, visualization, and exporting results. Make sure all packages are installed before running this chunk.
+
+```{r load-packages}
+# These packages allow you to:
+# - read Excel files (readxl)
+# - create visualizations (ggplot2)
+# - manipulate data frames (dplyr)
+# - extract model summaries in tidy format (broom)
+# - export data to Excel format (writexl)
+
+# Install missing packages if needed
+packages <- c("readxl", "ggplot2", "dplyr", "broom", "writexl", "httr")
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+# Load packages if owned
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(writexl)
+library(httr)
+```
+
+# Download Data to Desktop and Load
+
+Here we define where the data will be downloaded (in this case, your Desktop), download the dataset from the GitHub repository if it's not already present, and read it into R while removing any rows with missing values.
+
+```{r load-data}
+# Define the download destination (Desktop)
+desktop_path <- file.path(Sys.getenv("USERPROFILE"), "Desktop")
+local_file <- file.path(desktop_path, "Acestrorhynchus_lacustris_length_length.xlsx")
+
+# URL to the raw file on GitHub
+github_file_url <- "https://raw.githubusercontent.com/ICTES-UNIOESTE/LWR-and-LLR-of-fish-species-from-Itaipu-Reservoir/main/Acestrorhynchus%20lacustris%20length%E2%80%92length.xlsx"
+
+# Download the file if it doesn't already exist
+if (!file.exists(local_file)) {
+  download.file(github_file_url, destfile = local_file, mode = "wb")
+}
+
+# Read and clean the data
+Data <- read_xlsx(local_file) %>% na.omit()
+
+# Remove rows with zero total length
+if (any(Data$T_Length == 0)) {
+  Data <- Data[Data$T_Length != 0, ]
+}
+```
+
+# Outlier Detection and Data Preparation
+
+We now identify potential outliers by calculating standardized residuals from an initial linear regression. Outliers are excluded if |Z| ≥ 4. Additionally, we remove individuals with `Sex == 9` to ensure clean group comparisons.
+
+```{r}
+T_Length <- Data$T_Length  # Total length
+S_Length <- Data$S_Length  # Standard length
+
+Reg <- lm(T_Length ~ S_Length)
+Z.Res <- Reg$residuals / sd(Reg$residuals)
+outlier <- which(abs(Z.Res) >= 4)
+
+Sex <- factor(Data$Sex)
+DF.S.outlier <- data.frame(Sex, T_Length, S_Length)
+if (length(outlier) > 0) {
+  DF.S.outlier <- DF.S.outlier[-outlier, ]
+}
+
+# Remove invalid sex entries
+DF.S9.outlier <- DF.S.outlier[DF.S.outlier$Sex != "9", ]
+```
+
+# ANCOVA: Check for Sex Differences
+
+This section applies ANCOVA to test whether there are significant differences in the LLR by sex. If the interaction or main effect is significant, separate models for each sex will be fitted.
+
+```{r}
+Ancova <- lm(T_Length ~ S_Length * Sex, data = DF.S9.outlier)
+
+p.int <- anova(Ancova)["S_Length:Sex", "Pr(>F)"]
+p.sex <- anova(Ancova)["Sex", "Pr(>F)"]
+```
+
+# General Model and Plot (No Sex Effect)
+
+If ANCOVA does not detect significant sex differences, this model will fit a single LLR for all individuals, exporting estimates and generating a plot.
+
+```{r}
+if (p.int >= 0.05 & p.sex >= 0.05) {
+  Reg <- lm(T_Length ~ S_Length, data = DF.S.outlier)
+  Resumo <- summary(Reg)
+
+  parametros <- cbind(Resumo$coefficients[, 1:2], confint(Reg))
+  colnames(parametros) <- c("estimate", "SE", "-95%CI", "95%CI")
+  parametros <- data.frame(Parameter = rownames(parametros), parametros)
+
+  R2 <- Resumo$r.squared
+  n <- nrow(DF.S.outlier)
+
+  # Export results
+  Result <- list(Parameter = parametros, R2 = R2, n = n,
+                 Min_Max_S_Length = range(DF.S.outlier$S_Length),
+                 Min_Max_T_Length = range(DF.S.outlier$T_Length))
+  print(Result)
+
+  # Predict and plot
+  icx <- predict(Reg, interval = "confidence")
+  DF <- data.frame(icx, S_Length = DF.S.outlier$S_Length, T_Length = DF.S.outlier$T_Length)
+  DF <- DF[order(DF$fit), ]
+
+  # Plot and show on HTML and save PNG
+  p1 <- ggplot(DF, aes(x = S_Length, y = T_Length)) +
+    geom_point() +
+    geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey80", alpha = 0.5) +
+    geom_line(aes(y = fit), color = "red", size = 1) +
+    labs(x = "Standard Length (cm)", y = "Total Length (cm)", title = "Length–Length Relationship") +
+    theme_minimal()
+  
+  print(p1)
+
+  ggsave(file.path(desktop_path, "LLR_general_plot.png"), plot = p1, width = 12, height = 8, dpi = 150, bg = "white")
+}
+```
+
+# Separate Models by Sex (If Significant)
+
+If ANCOVA indicates sex differences, this section fits and exports individual models by sex. It also generates a comparative plot.
+
+```{r}
+if (p.int < 0.05 | p.sex < 0.05) {
+  results_by_sex <- split(DF.S9.outlier, DF.S9.outlier$Sex)
+
+  results_by_sex <- lapply(results_by_sex, function(df) {
+    if (nrow(df) == 0) return(NULL)
+    Reg <- lm(T_Length ~ S_Length, data = df)
+    Resumo <- summary(Reg)
+    parametros <- cbind(Resumo$coefficients[, 1:2], confint(Reg))
+    colnames(parametros) <- c("estimate", "SE", "-95%CI", "95%CI")
+    parametros <- data.frame(Parameter = rownames(parametros), parametros)
+
+    list(parametros = parametros, R2 = Resumo$r.squared, n = nrow(df))
+  })
+
+  export_ready <- lapply(results_by_sex, function(res) {
+    if (is.null(res)) return(NULL)
+    bind_rows(
+      res$parametros,
+      data.frame(Parameter = "R2", estimate = res$R2, SE = NA, `-95%CI` = NA, `95%CI` = NA),
+      data.frame(Parameter = "n", estimate = res$n, SE = NA, `-95%CI` = NA, `95%CI` = NA)
+    )
+  })
+  
+  export_ready <- export_ready[!sapply(export_ready, is.null)]
+  names(export_ready) <- names(results_by_sex)
+
+  write_xlsx(export_ready, path = file.path(desktop_path, "LLR_by_sex_results.xlsx"))
+
+  # Plotting
+  p2 <- ggplot(DF.S9.outlier, aes(x = S_Length, y = T_Length, color = Sex)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(x = "Standard Length (cm)", y = "Total Length (cm)", title = "Sex-specific Length–Length Relationship") +
+    theme_minimal()
+
+  print(p2)
+
+  ggsave(file.path(desktop_path, "LLR_by_sex_plot.png"), plot = p2, width = 12, height = 8, dpi = 150)
+}
+```
+
+# Export Results and Plots to Desktop
+
+```{r export-results-general}
+# Check if the general model exists before saving
+if (exists("Parameter") && exists("R2") && exists("n") && exists("DF") && exists("lwr") && exists("upr")) {
+  write_xlsx(list(Parameter = as.data.frame(Parameter),
+                  Metadata = data.frame(R2 = R2, n = n)),
+             path = file.path(desktop_path, "LLR_summary_results.xlsx"))
+
+  # Save general plot to Desktop as PNG
+  png(filename = file.path(desktop_path, "LLR_general_plot.png"), width = 1200, height = 800, res = 150)
+  print(
+    ggplot(DF, aes(x = S_Length, y = T_Length)) +
+      geom_point() +
+      geom_ribbon(aes(ymin = 10^lwr, ymax = 10^upr), fill = "grey80", alpha = 0.5) +
+      geom_line(aes(y = 10^fit), color = "red", size = 1) +
+      labs(x = "Standard Length (cm)", y = "Weight (g)", title = "Length–Weight Relationship") +
+      theme_minimal()
+  )
+  dev.off()
+} else {
+  message("General model objects not found. Skipping export.")
+}
+```
+
+```{r export-results-sex}
+# Check if results_by_sex exists and is a valid list of data frames before writing
+if (exists("results_by_sex") && length(results_by_sex) > 0 && all(sapply(results_by_sex, is.list))) {
+
+  # Convert each element in results_by_sex to a data frame
+  export_ready <- lapply(results_by_sex, function(res) {
+    if (is.null(res)) return(NULL)
+    out <- bind_rows(
+      as.data.frame(t(unlist(res$Parameter))),
+      as.data.frame(t(unlist(res$test_b))),
+      data.frame(R2 = res$R2, n = res$n, 
+                 Min_S_Length = res$Min_Max_S_Length[1], Max_S_Length = res$Min_Max_S_Length[2],
+                 Min_T_Length = res$Min_Max_T_Length[1], Max_T_Length = res$Min_Max_T_Length[2])
+    )
+    return(out)
+  })
+
+  # Remove NULLs
+  export_ready <- export_ready[!sapply(export_ready, is.null)]
+  names(export_ready) <- names(results_by_sex)
+
+  # Save to Excel
+  write_xlsx(export_ready, path = file.path(desktop_path, "LLR_by_sex_results.xlsx"))
+
+  # Save plot as PNG
+  png(filename = file.path(desktop_path, "LLR_sex_specific_plot.png"), width = 1200, height = 800, res = 150)
+    print(
+      ggplot(DF.S9.outlier, aes(x = S_Length, y = T_Length, color = Sex)) +
+        geom_point() +
+        geom_smooth(method = "lm", formula = y ~ x, se = TRUE) +
+        labs(x = "Standard Length (cm)", y = "Total Length (cm)", title = "Sex-specific LLR") +
+        theme_minimal()
+    )
+  dev.off()
+
+} else {
+  message("Sex-specific results not available or improperly formatted. Skipping export.")
+}
+```
+
+# Conclusion
+
+This R Markdown guide provides a complete and reproducible workflow for analyzing Length–Length Relationships (LLR) in freshwater fish populations. Specifically, it allows users to:
+
+- Clean and filter raw morphometric data
+- Detect and remove statistical outliers
+- Test for differences between sexes using ANCOVA
+- Plot the relationships with fitted regression lines and confidence intervals
+- Export results in user-friendly Excel tables
+
+# Glossary
+
+**LLR**: Length–Length Relationship. A model describing how different body length metrics relate to each other.
+
+**ANCOVA**: Analysis of Covariance. A statistical technique used to compare one or more regression lines.
+
+**Residual**: The difference between observed and predicted values from a model.
+
+# FAQ
+
+**Q: Why exclude individuals with total length equal to zero?**
+A: A total length (CT) value of zero likely indicates a measurement error or placeholder. Including these records could distort the regression and affect model accuracy.
+
+**Q: Why test for sex differences in the LLR model?**
+A: Sexual dimorphism may affect body proportions. If males and females grow differently, combining their data in a single model may mask biologically important variation.
+
+**Q: What is the expected relationship between standard length and total length?**
+A: While the exact relationship may vary by species, it is typically linear. The model assumes that one length metric can predict the other using a consistent scaling relationship.
+
+**Q: Why remove individuals with sex = 9?**
+A: These entries usually represent missing, unclassified, or invalid sex designations and could bias results.
+
+**Q: Can I apply this method to other datasets?**
+A: Yes. Just replace the Excel file with your own and adjust the column names (CT, CP, Sexo) accordingly. The workflow is designed to be flexible and easily reusable.
