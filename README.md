@@ -6,7 +6,7 @@ The repository includes:
 
 📂 Excel spreadsheets with raw data for a fish species (_Acestrorhynchus lacustris_) used as example;
 
-📄 Detailed R Markdown (.Rmd) and HTML files that guides users through the process of:
+📄 Detailed R Markdown (.Rmd) and HTML (.html) files that guides users through the process of:
 
  -Fitting Length–Weight Relationships (LWR files)
  
