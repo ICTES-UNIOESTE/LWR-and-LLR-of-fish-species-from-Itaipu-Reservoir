@@ -1,6 +1,6 @@
 This repository provides the data and annotated R scripts necessary to replicate the analyses presented in the paper:
 
-“Length–weight and length–length relationships of freshwater fish species caught by professional fishermen in the Itaipu Reservoir, Paraná River basin, Brazil”
+“Length–weight and length–length relationships of freshwater fish species caught by professional fishermen in the Itaipu Reservoir, Brazil”
 
 The repository includes:
 
