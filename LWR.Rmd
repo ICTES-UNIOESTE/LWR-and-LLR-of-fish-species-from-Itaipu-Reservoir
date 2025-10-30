@@ -1,6 +1,6 @@
 ---
 title: "Guide to Length–Weight Relationship Analysis for Freshwater Fish"
-author: "Éder André Gubiani, Luiz Guilherme dos Santos Ribas, Anderson Luís Maciel, Geuza Cantanhêde, Laís Thayse Meier, Carlos Henrique Monteiro Patrício, Pitágoras Augusto Piana, and Caroline Henn"
+author: "Éder André Gubiani, Luiz Guilherme dos Santos Ribas, Anderson Luís Maciel, Geuza Cantanhêde, Laís Thayse Meier, Pitágoras Augusto Piana, and Caroline Henn"
 date: "04/24/2025"
 output:
   html_document:
@@ -326,3 +326,4 @@ A: In this dataset, the value 9 was used to indicate missing, undefined, or inva
 
 **Q: Can I use this script with a different dataset?**
 A: Yes, update the `github_file_url` with your own file and ensure column names match (e.g., `Weight`, `S_Length`, `Sex`). The code was designed for multiple uses with small adjustments needed.
+
