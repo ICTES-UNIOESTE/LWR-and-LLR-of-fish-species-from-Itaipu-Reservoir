@@ -1,6 +1,6 @@
 ---
 title: "Guide to Length–Length Relationship Analysis for Freshwater Fish"
-author: "Éder André Gubiani, Luiz Guilherme dos Santos Ribas, Anderson Luís Maciel, Geuza Cantanhêde, Laís Thayse Meier, Carlos Henrique Monteiro Patrício, Pitágoras Augusto Piana, and Caroline Henn"
+author: "Éder André Gubiani, Luiz Guilherme dos Santos Ribas, Anderson Luís Maciel, Geuza Cantanhêde, Laís Thayse Meier, Pitágoras Augusto Piana, and Caroline Henn"
 date: "04/24/2025"
 output:
   html_document:
@@ -305,3 +305,4 @@ A: These entries usually represent missing, unclassified, or invalid sex designa
 
 **Q: Can I apply this method to other datasets?**
 A: Yes. Just replace the Excel file with your own and adjust the column names (CT, CP, Sexo) accordingly. The workflow is designed to be flexible and easily reusable.
+
